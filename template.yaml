@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: File Gateway Service with Signed URLs
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: file-gateway-bucket
+    Description: Name for the S3 bucket (must be globally unique)
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.11
+    Environment:
+      Variables:
+        BUCKET_NAME: !Ref FileStorageBucket
+
+Resources:
+  # S3 Bucket for file storage
+  FileStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${BucketName}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - PUT
+              - POST
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3000
+
+  # Lambda function for handling file operations
+  FileGatewayFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: app.lambda_handler
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref FileStorageBucket
+      Events:
+        PrepareUpload:
+          Type: Api
+          Properties:
+            Path: /files
+            Method: POST
+            RestApiId: !Ref FileGatewayApi
+        DownloadFile:
+          Type: Api
+          Properties:
+            Path: /files/{objectKey+}
+            Method: GET
+            RestApiId: !Ref FileGatewayApi
+
+  # API Gateway
+  FileGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'*'"
+        AllowOrigin: "'*'"
+
+Outputs:
+  ApiEndpoint:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${FileGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  
+  BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref FileStorageBucket
+  
+  FunctionArn:
+    Description: "Lambda Function ARN"
+    Value: !GetAtt FileGatewayFunction.Arn
